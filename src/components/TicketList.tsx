@@ -1,34 +1,40 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { db, Ticket } from '../services/db';
+import { api } from '../services/api';
+import type { Ticket, Provider, Location } from '../services/db';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
 
 export function TicketList() {
   const { user } = useAuth();
   const [tickets, setTickets] = useState<Ticket[]>([]);
-  const navigate = useNavigate();
+  const [providers, setProviders] = useState<Provider[]>([]);
+  const [locations, setLocations] = useState<Location[]>([]);
 
   useEffect(() => {
-    const fetchTickets = async () => {
-      let fetchedTickets;
-      if (user?.isAdmin) {
-        fetchedTickets = await db.tickets.toArray(); // Obtener todos los tickets
-      } else {
-        fetchedTickets = await db.tickets.where('userId').equals(user.id).toArray(); // Filtrar por ID de usuario
+    const fetchData = async () => {
+      try {
+        const [providersData, locationsData, ticketsData] = await Promise.all([
+          api.getProviders(),
+          api.getLocations(),
+          api.getTickets(user?.email || '', !!user?.isAdmin)
+        ]);
+        
+        setProviders(providersData);
+        setLocations(locationsData);
+        setTickets(ticketsData);
+      } catch (error) {
+        console.error('Error fetching data:', error);
       }
-
-      // Obtener nombres de usuarios para cada ticket
-      const ticketsWithUser = await Promise.all(fetchedTickets.map(async (ticket) => {
-        const user = await db.users.get(ticket.userId); // Obtener el usuario por ID
-        return { ...ticket, userName: user?.name || 'Desconocido' }; // Agregar el nombre del usuario
-      }));
-
-      setTickets(ticketsWithUser);
     };
 
-    fetchTickets();
+    fetchData();
+
+    // Configurar intervalo de refresco cada 5 segundos
+    const interval = setInterval(fetchData, 5000);
+
+    // Limpiar intervalo al desmontar
+    return () => clearInterval(interval);
   }, [user]);
 
   return (
@@ -50,14 +56,18 @@ export function TicketList() {
               <tr key={ticket.id}>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-300">{ticket.id}</td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-300">{ticket.idc}</td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-300">{ticket.provider}</td>
+                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-300">
+                  {providers.find(p => p.id === ticket.providerId)?.name}
+                </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-300">{ticket.caseNumber}</td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-300">{ticket.client}</td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-300">{ticket.location}</td>
+                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-300">
+                  {locations.find(l => l.id === ticket.locationId)?.name}
+                </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-300">{format(new Date(ticket.serviceDate), 'dd/MM/yyyy', { locale: es })}</td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-300">{ticket.startTime}</td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-300">{ticket.endTime}</td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-300">{ticket.userName}</td>
+                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-300">{ticket.userEmail}</td>
               </tr>
             ))}
           </tbody>

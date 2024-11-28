@@ -1,14 +1,14 @@
 import { useState, useEffect } from 'react';
-import { ticketService, db, Ticket, Provider, Location } from '../services/db';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
-import { PlusIcon, PencilIcon, TrashIcon, FunnelIcon } from '@heroicons/react/24/outline';
+import { PlusIcon, PencilIcon, TrashIcon } from '@heroicons/react/24/outline';
 import { NewTicketModal } from './NewTicketModal';
-import { useLiveQuery } from 'dexie-react-hooks';
+import { api } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import { utils, writeFile } from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import type { Ticket, Provider, Location } from '../services/db';
 
 export function TicketsManager() {
   const { user, isAdmin } = useAuth();
@@ -26,45 +26,38 @@ export function TicketsManager() {
   const [editingTicket, setEditingTicket] = useState<Ticket | null>(null);
   const [showConfirmDelete, setShowConfirmDelete] = useState<number | null>(null);
 
-  const liveTickets = useLiveQuery(async () => {
-    if (isAdmin) {
-      return await db.tickets.toArray();
-    } else {
-      return await db.tickets
-        .where('userEmail')
-        .equals(user?.email || '')
-        .toArray();
+  const loadData = async () => {
+    try {
+      console.log('Cargando datos con:', { email: user?.email, isAdmin }); // Debug
+      const [ticketsData, providersData, locationsData] = await Promise.all([
+        api.getTickets(user?.email || '', isAdmin),
+        api.getProviders(),
+        api.getLocations()
+      ]);
+      
+      setTickets(ticketsData);
+      setProviders(providersData);
+      setLocations(locationsData);
+      setFilteredTickets(ticketsData); // Actualizar también los tickets filtrados
+      
+      console.log('Datos cargados:', { tickets: ticketsData.length }); // Debug
+    } catch (error) {
+      console.error('Error cargando datos:', error);
     }
-  }, [user?.email, isAdmin]);
+  };
 
-  useEffect(() => {
-    if (liveTickets) {
-      setTickets(liveTickets);
-    }
-  }, [liveTickets]);
-
+  // Efecto para cargar datos iniciales y configurar actualización periódica
   useEffect(() => {
     loadData();
-  }, [dateRange]);
+    const interval = setInterval(loadData, 5000); // Actualizar cada 5 segundos
+    return () => clearInterval(interval);
+  }, [user?.email, isAdmin]);
 
   useEffect(() => {
     if (tickets) {
       applyFilters();
     }
   }, [tickets, filters]);
-
-  const loadData = async () => {
-    try {
-      const [loadedProviders, loadedLocations] = await Promise.all([
-        db.providers.toArray(),
-        db.locations.toArray()
-      ]);
-      setProviders(loadedProviders);
-      setLocations(loadedLocations);
-    } catch (error) {
-      console.error('Error cargando datos:', error);
-    }
-  };
 
   const applyFilters = () => {
     if (!tickets) return;
@@ -87,7 +80,7 @@ export function TicketsManager() {
   };
 
   const handleDelete = async (id: number) => {
-    await ticketService.deleteTicket(id);
+    await api.deleteTicket(id);
     loadData();
     setShowConfirmDelete(null);
   };
@@ -317,7 +310,7 @@ export function TicketsManager() {
                             <PencilIcon className="h-5 w-5" />
                           </button>
                           <button
-                            onClick={() => setShowConfirmDelete(ticket.id)}
+                            onClick={() => setShowConfirmDelete(ticket.id || null)}
                             className="text-red-600 hover:text-red-900 dark:text-red-400 dark:hover:text-red-300"
                           >
                             <TrashIcon className="h-5 w-5" />

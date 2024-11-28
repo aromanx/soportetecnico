@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
-import { Ticket, Provider, Location, db } from '../services/db';
 import { PlusIcon } from '@heroicons/react/24/outline';
 import { useAuth } from '../contexts/AuthContext';
+import { api } from '../services/api';
+import type { Ticket, Provider, Location } from '../services/db';
 
 interface NewTicketModalProps {
   ticket?: Ticket | null;
@@ -26,6 +27,7 @@ export function NewTicketModal({ ticket, onClose, onSave }: NewTicketModalProps)
     serviceDate: '',
     startTime: '',
     endTime: '',
+    userEmail: '',
   });
 
   useEffect(() => {
@@ -40,28 +42,34 @@ export function NewTicketModal({ ticket, onClose, onSave }: NewTicketModalProps)
         serviceDate: ticket.serviceDate,
         startTime: ticket.startTime,
         endTime: ticket.endTime,
+        userEmail: ticket.userEmail,
       });
     }
   }, [ticket]);
 
   const loadCatalogs = async () => {
-    const loadedProviders = await db.providers.toArray();
-    const loadedLocations = await db.locations.toArray();
-    setProviders(loadedProviders);
-    setLocations(loadedLocations);
+    try {
+      const [loadedProviders, loadedLocations] = await Promise.all([
+        api.getProviders(),
+        api.getLocations()
+      ]);
+      setProviders(loadedProviders);
+      setLocations(loadedLocations);
+    } catch (error) {
+      console.error('Error loading catalogs:', error);
+    }
   };
 
   const handleAddProvider = async () => {
     if (newProvider.trim()) {
       try {
-        const id = await db.providers.add({ name: newProvider });
-        const addedProvider = { id: Number(id), name: newProvider };
+        const addedProvider = await api.createProvider({ name: newProvider });
         setProviders([...providers, addedProvider]);
-        setFormData({ ...formData, providerId: Number(id) });
+        setFormData({ ...formData, providerId: addedProvider.id });
         setNewProvider('');
         setShowProviderModal(false);
       } catch (error) {
-        console.error('Error al agregar proveedor:', error);
+        console.error('Error adding provider:', error);
       }
     }
   };
@@ -69,31 +77,59 @@ export function NewTicketModal({ ticket, onClose, onSave }: NewTicketModalProps)
   const handleAddLocation = async () => {
     if (newLocation.trim()) {
       try {
-        const id = await db.locations.add({ name: newLocation });
-        const addedLocation = { id: Number(id), name: newLocation };
+        const addedLocation = await api.createLocation({ name: newLocation });
         setLocations([...locations, addedLocation]);
-        setFormData({ ...formData, locationId: Number(id) });
+        setFormData({ ...formData, locationId: addedLocation.id });
         setNewLocation('');
         setShowLocationModal(false);
       } catch (error) {
-        console.error('Error al agregar localidad:', error);
+        console.error('Error adding location:', error);
       }
+    }
+  };
+
+  const handleDeleteProvider = async (providerId: number) => {
+    try {
+      await api.deleteProvider(providerId);
+      const updatedProviders = await api.getProviders();
+      setProviders(updatedProviders);
+      if (formData.providerId === providerId) {
+        setFormData({ ...formData, providerId: 0 });
+      }
+    } catch (error) {
+      console.error('Error eliminando proveedor:', error);
+    }
+  };
+
+  const handleDeleteLocation = async (locationId: number) => {
+    try {
+      await api.deleteLocation(locationId);
+      const updatedLocations = await api.getLocations();
+      setLocations(updatedLocations);
+      if (formData.locationId === locationId) {
+        setFormData({ ...formData, locationId: 0 });
+      }
+    } catch (error) {
+      console.error('Error eliminando localidad:', error);
     }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (ticket?.id) {
-      await db.tickets.update(ticket.id, formData);
-    } else {
-      await db.tickets.add({
-        ...formData,
-        createdAt: new Date(),
-        userId: user?.id || 0,
-        userEmail: user?.email || '',
-      });
+    try {
+      if (ticket?.id) {
+        await api.updateTicket(ticket.id, formData);
+      } else {
+        await api.createTicket({
+          ...formData,
+          userId: 0,
+          userEmail: user?.email || '',
+        });
+      }
+      onSave();
+    } catch (error) {
+      console.error('Error saving ticket:', error);
     }
-    onSave();
   };
 
   return (
@@ -121,24 +157,33 @@ export function NewTicketModal({ ticket, onClose, onSave }: NewTicketModalProps)
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                 Proveedor
               </label>
-              <div className="flex gap-2">
+              <div className="mt-1 flex gap-2">
                 <select
                   value={formData.providerId}
                   onChange={(e) => setFormData({ ...formData, providerId: Number(e.target.value) })}
-                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-light-primary focus:ring-light-primary dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                  className="block w-full rounded-md border-gray-300 shadow-sm focus:border-light-primary focus:ring-light-primary dark:bg-gray-700 dark:border-gray-600 dark:text-white"
                   required
                 >
                   <option value="">Seleccione un proveedor</option>
                   {providers.map((provider) => (
-                    <option key={provider.id} value={provider.id}>
-                      {provider.name}
+                    <option 
+                      key={provider.id} 
+                      value={provider.id}
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        if (window.confirm('¿Está seguro de que desea eliminar este proveedor?')) {
+                          handleDeleteProvider(provider.id);
+                        }
+                      }}
+                    >
+                      {provider.name} {/* El botón de eliminar aparecerá con clic derecho */}
                     </option>
                   ))}
                 </select>
                 <button
                   type="button"
                   onClick={() => setShowProviderModal(true)}
-                  className="mt-1 p-2 bg-light-primary text-white rounded-md hover:bg-opacity-90 dark:bg-dark-accent"
+                  className="p-2 bg-light-primary text-white rounded-md hover:bg-opacity-90 dark:bg-dark-accent"
                 >
                   <PlusIcon className="h-5 w-5" />
                 </button>
@@ -175,24 +220,33 @@ export function NewTicketModal({ ticket, onClose, onSave }: NewTicketModalProps)
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                 Localidad
               </label>
-              <div className="flex gap-2">
+              <div className="mt-1 flex gap-2">
                 <select
                   value={formData.locationId}
                   onChange={(e) => setFormData({ ...formData, locationId: Number(e.target.value) })}
-                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-light-primary focus:ring-light-primary dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                  className="block w-full rounded-md border-gray-300 shadow-sm focus:border-light-primary focus:ring-light-primary dark:bg-gray-700 dark:border-gray-600 dark:text-white"
                   required
                 >
                   <option value="">Seleccione una localidad</option>
                   {locations.map((location) => (
-                    <option key={location.id} value={location.id}>
-                      {location.name}
+                    <option 
+                      key={location.id} 
+                      value={location.id}
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        if (window.confirm('¿Está seguro de que desea eliminar esta localidad?')) {
+                          handleDeleteLocation(location.id);
+                        }
+                      }}
+                    >
+                      {location.name} {/* El botón de eliminar aparecerá con clic derecho */}
                     </option>
                   ))}
                 </select>
                 <button
                   type="button"
                   onClick={() => setShowLocationModal(true)}
-                  className="mt-1 p-2 bg-light-primary text-white rounded-md hover:bg-opacity-90 dark:bg-dark-accent"
+                  className="p-2 bg-light-primary text-white rounded-md hover:bg-opacity-90 dark:bg-dark-accent"
                 >
                   <PlusIcon className="h-5 w-5" />
                 </button>

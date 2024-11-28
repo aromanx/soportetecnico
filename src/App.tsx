@@ -1,62 +1,57 @@
-import { Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { AuthProvider } from './contexts/AuthContext';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { Login } from './components/Login';
 import { Layout } from './components/Layout';
-import { Home } from './pages/Home';
-import { UserManagement } from './components/UserManagement';
 import { TicketsManager } from './components/TicketsManager';
+import { UserManagement } from './components/UserManagement';
 import { useAuth } from './contexts/AuthContext';
 
-function ProtectedRoute({ children, adminOnly = false }: { children: JSX.Element, adminOnly?: boolean }) {
-  const { isAuthenticated, isAdmin } = useAuth();
-
-  if (!isAuthenticated) {
-    return <Navigate to="/login" />;
+function ProtectedRoute({ children }: { children: React.ReactNode }) {
+  const { user } = useAuth();
+  
+  if (!user) {
+    console.log('Usuario no autenticado, redirigiendo a /login');
+    return <Navigate to="/login" replace />;
   }
 
-  if (adminOnly && !isAdmin) {
-    return <Navigate to="/" />;
-  }
-
-  return children;
+  return <>{children}</>;
 }
 
-function App() {
-  const { isAuthenticated } = useAuth();
+function AdminRoute({ children }: { children: React.ReactNode }) {
+  const { user, isAdmin } = useAuth();
+  
+  if (!user || !isAdmin) {
+    console.log('Usuario no es admin, redirigiendo a /tickets');
+    return <Navigate to="/tickets" replace />;
+  }
 
+  return <>{children}</>;
+}
+
+export default function App() {
   return (
-    <ThemeProvider>
-      <Routes>
-        <Route 
-          path="/login" 
-          element={isAuthenticated ? <Navigate to="/" /> : <Login />} 
-        />
-        <Route
-          path="/"
-          element={isAuthenticated ? <Layout /> : <Navigate to="/login" />}
-        >
-          <Route index element={<Home />} />
-          <Route
-            path="tickets"
-            element={
+    <BrowserRouter>
+      <AuthProvider>
+        <ThemeProvider>
+          <Routes>
+            <Route path="/login" element={<Login />} />
+            <Route path="/" element={
               <ProtectedRoute>
-                <TicketsManager />
+                <Layout />
               </ProtectedRoute>
-            }
-          />
-          <Route
-            path="users"
-            element={
-              <ProtectedRoute adminOnly>
-                <UserManagement />
-              </ProtectedRoute>
-            }
-          />
-        </Route>
-        <Route path="*" element={<Navigate to="/" />} />
-      </Routes>
-    </ThemeProvider>
+            }>
+              <Route index element={<Navigate to="/tickets" replace />} />
+              <Route path="tickets" element={<TicketsManager />} />
+              <Route path="users" element={
+                <AdminRoute>
+                  <UserManagement />
+                </AdminRoute>
+              } />
+            </Route>
+          </Routes>
+        </ThemeProvider>
+      </AuthProvider>
+    </BrowserRouter>
   );
 }
-
-export default App;

@@ -1,56 +1,47 @@
-import { createContext, useContext, useState } from 'react';
-import { userService } from '../services/db';
-
-interface User {
-  email: string;
-  isAdmin: boolean;
-  name: string;
-}
+import { createContext, useContext, useState, ReactNode, useEffect } from 'react';
+import { api } from '../services/api';
+import type { User } from '../services/db';
 
 interface AuthContextType {
-  isAdmin: boolean;
-  isAuthenticated: boolean;
   user: User | null;
-  login: (email: string, password: string, remember: boolean) => Promise<boolean>;
+  isAdmin: boolean;
+  login: (email: string, password: string) => Promise<boolean>;
   logout: () => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-export function AuthProvider({ children }: { children: React.ReactNode }) {
+export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(() => {
     const savedUser = localStorage.getItem('user');
     return savedUser ? JSON.parse(savedUser) : null;
   });
 
-  const login = async (email: string, password: string, remember: boolean) => {
-    try {
-      console.log('Intentando login...'); // Para debugging
-      const dbUser = await userService.login(email, password);
-      console.log('Resultado login:', dbUser); // Para debugging
+  useEffect(() => {
+    if (user) {
+      localStorage.setItem('user', JSON.stringify(user));
+    } else {
+      localStorage.removeItem('user');
+    }
+  }, [user]);
 
-      if (dbUser) {
-        const loggedUser = {
-          email: dbUser.email,
-          isAdmin: dbUser.isAdmin,
-          name: dbUser.name
+  const login = async (email: string, password: string) => {
+    try {
+      console.log('Intentando login con:', { email, password });
+      const userData = await api.login(email, password);
+      console.log('Respuesta del servidor:', userData);
+      
+      if (userData && !userData.error) {
+        const normalizedUser = {
+          ...userData,
+          isAdmin: Boolean(userData.isAdmin)
         };
-        
-        setUser(loggedUser);
-        localStorage.setItem('user', JSON.stringify(loggedUser));
-        
-        if (remember) {
-          localStorage.setItem('savedCredentials', JSON.stringify({ email, password }));
-        } else {
-          localStorage.removeItem('savedCredentials');
-        }
-        
+        setUser(normalizedUser);
         return true;
       }
-
       return false;
     } catch (error) {
-      console.error('Error durante el login:', error);
+      console.error('Error en login:', error);
       return false;
     }
   };
@@ -60,25 +51,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     localStorage.removeItem('user');
   };
 
-  const value = {
-    isAdmin: user?.isAdmin || false,
-    isAuthenticated: user !== null,
-    user,
-    login,
-    logout
-  };
-
   return (
-    <AuthContext.Provider value={value}>
+    <AuthContext.Provider value={{
+      user,
+      isAdmin: Boolean(user?.isAdmin),
+      login,
+      logout
+    }}>
       {children}
     </AuthContext.Provider>
   );
 }
 
-export const useAuth = () => {
+export function useAuth() {
   const context = useContext(AuthContext);
   if (context === undefined) {
-    throw new Error('useAuth must be used within an AuthProvider');
+    throw new Error('useAuth debe ser usado dentro de un AuthProvider');
   }
   return context;
-}; 
+} 

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import { userService, User } from '../services/db';
+import { api } from '../services/api';
+import type { User } from '../services/db';
 import { MagnifyingGlassIcon, PencilIcon, TrashIcon, KeyIcon, EyeIcon, EyeSlashIcon } from '@heroicons/react/24/outline';
 
 export function UserManagement() {
@@ -11,7 +12,7 @@ export function UserManagement() {
   const [showConfirmDelete, setShowConfirmDelete] = useState<number | null>(null);
   const [showPasswordChange, setShowPasswordChange] = useState(false);
   const [newPassword, setNewPassword] = useState('');
-  const [newUser, setNewUser] = useState<User>({
+  const [newUser, setNewUser] = useState<Omit<User, 'id'>>({
     email: '',
     name: '',
     password: '',
@@ -20,8 +21,20 @@ export function UserManagement() {
   const [showPassword, setShowPassword] = useState(false);
   const [showNewPassword, setShowNewPassword] = useState(false);
 
+  const loadUsers = async () => {
+    try {
+      const allUsers = await api.getUsers();
+      setUsers(allUsers);
+      setFilteredUsers(allUsers);
+    } catch (error) {
+      console.error('Error cargando usuarios:', error);
+    }
+  };
+
   useEffect(() => {
     loadUsers();
+    const interval = setInterval(loadUsers, 5000); // Actualizar cada 5 segundos
+    return () => clearInterval(interval);
   }, []);
 
   useEffect(() => {
@@ -36,30 +49,26 @@ export function UserManagement() {
     }
   }, [searchTerm, users]);
 
-  const loadUsers = async () => {
-    const allUsers = await userService.getAllUsers();
-    setUsers(allUsers);
-    setFilteredUsers(allUsers);
-  };
-
   const handleAddUser = async () => {
     if (!newUser.email.match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/)) {
-      // Mostrar error de formato de correo inválido
       return;
     }
 
     if (newUser.email && newUser.name && newUser.password) {
-      await userService.createUser(newUser);
-      await loadUsers();
-      setOpenDialog(false);
-      setNewUser({ email: '', name: '', password: '', isAdmin: false });
+      try {
+        await api.createUser(newUser);
+        await loadUsers(); // Recargar usuarios después de crear uno nuevo
+        setOpenDialog(false);
+        resetForm();
+      } catch (error) {
+        console.error('Error creando usuario:', error);
+      }
     }
   };
 
   const handleUpdateUser = async () => {
     if (editingUser?.id) {
       if (editingUser.email !== 'admin' && !editingUser.email.match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/)) {
-        // Mostrar error de formato de correo inválido
         return;
       }
 
@@ -73,7 +82,7 @@ export function UserManagement() {
         updateData.password = newPassword;
       }
 
-      await userService.updateUser(editingUser.id, updateData);
+      await api.updateUser(editingUser.id, updateData);
       await loadUsers();
       setEditingUser(null);
       setShowPasswordChange(false);
@@ -82,7 +91,7 @@ export function UserManagement() {
   };
 
   const handleDeleteUser = async (id: number) => {
-    await userService.deleteUser(id);
+    await api.deleteUser(id);
     await loadUsers();
     setShowConfirmDelete(null);
   };
@@ -91,6 +100,15 @@ export function UserManagement() {
     setEditingUser(user);
     setShowPasswordChange(false);
     setNewPassword('');
+  };
+
+  const resetForm = () => {
+    setNewUser({
+      email: '',
+      name: '',
+      password: '',
+      isAdmin: false
+    });
   };
 
   return (
@@ -160,7 +178,7 @@ export function UserManagement() {
                           type="checkbox"
                           checked={user.isAdmin}
                           onChange={async () => {
-                            await userService.updateUser(user.id!, { isAdmin: !user.isAdmin });
+                            await api.updateUser(user.id!, { isAdmin: !user.isAdmin });
                             loadUsers();
                           }}
                           className="h-4 w-4 text-light-primary focus:ring-light-primary border-gray-300 rounded dark:border-gray-600"
